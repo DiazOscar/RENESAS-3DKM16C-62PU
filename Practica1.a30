@@ -1,0 +1,202 @@
+;****************************************************************************************
+;*															*
+;*	DISE�O BASADO EN MICROCONTROLADORES. CURSO 2021/2022  - OSCAR DIAZ SALDAÑA	  					*
+;*	PRACTICA 1	:  SUMA, RESTA, COMPARACION Y CONTAR UNOS(placa 3DKM16C)						*
+;*	FUNCION 	:  Realiza la funcion de suma, resta y comparacion sobre un par de numeros.
+;*      			Tambien cuenta la cantidad de unos que hay en ciertas posiciones de memoria.						*
+;*															*
+;****************************************************************************************
+;
+;----- INCLUYE FICHERO SFR -------------------------------------------------------------- 
+
+	.list off
+	.include sfr.inc
+	.list on
+;
+;----- DEFINICI�N DE S�MBOLOS 3DKM16C ----------------------------------------------------
+;
+VramTOP		.equ	000400h			; inicio de la RAM interna
+VramEND		.equ	007CFFh			; final de la RAM interna
+VprogTOP		.equ	0A0000h		; inicio del area de programa
+Vvector		.equ	0FFFDCh			; inicio tabla de interrupciones fija
+Vintbase		.equ	0FA000h		; inicio tabla de interrupciones variable
+VIstack		.equ	007CFFh			; stack pointer
+SB_base		.equ	000380h			; base address of SB recative
+;
+;----- AREA DE DATOS RAM -----------------------------------------------------------------
+;
+	.section	memory,data
+	.org	VramTOP
+;
+;----- AREA DE PROGRAMA ROM  -------------------------------------------------------------
+ 	.section	prog,code
+	.org	VprogTOP
+;
+;----- limpieza de la RAM e inicializacion de temporizador y puertos  --------------------
+;
+reset:
+	
+	mov.w	#0,R0				
+	mov.w	#(VramEND+1-VramTOP)/2,R3		
+	mov.w	#VramTOP,A1			
+	sstr.w
+
+	bset	PD2_0		; P2_0 salida 
+	bset	PD2_1		; P2_1 salida 
+	bset	PD2_5		; P2_5 salida 
+	mov.b	#80h,TA0MR	; TA0 en modo contador con f32
+	mov.w	#2250,TA0	; 2250 periodos de 27,77ns*32= 2 ms. (el reloj es de 36MHz)
+	bset	TA0S		; arranca el contador
+
+;----- PROGRAMA PRINCIPAL -----------------------------------------------------------------
+;
+main:
+	jsr		temporizador
+	jsr		sum0
+	jsr		temporizador
+	jsr 	sumne
+	jsr		temporizador
+	jsr 	cargar_numero
+	jmp 	main
+;
+;
+;----- SUBRUTINAS -----------------------------------------------------------------
+; SUMA RESTA Y COMPARACION = 0, ENCIENDE LEDS
+; Numero 1: 8888 8888
+; Numero 2: 2222 8888
+: Result : 	1110 AAAB
+sum0:
+	;CARGAMOS VALORES A SUMAR
+	mov.w #8888h, R0 	; Cargamos la parte baja del numero 1
+	mov.w #8888h, R2 	; ============IGUAL================ 2
+	add.w R0, R2		; Sumamos la parte baja de cada numero (suma maxima 16 bits)
+	mov.w #8888h, R1	; Cargamos la parte alta del numero 1
+	mov.w #2222h, R3	; ============IGUAL================ 2
+	adc.w R1, R3		; Sumamos la parte alta de cada numero, 
+						; incluyendo el acarreo de la suma parte baja
+	; CARGAMOS EL RESULTADO PARA RESTARLO
+	mov.w #1110h, R0	; Parte baja del resultado
+	mov.w #0AAABh, R1	; Parte alta del resultado
+	sub.w R2, R0		; Restamos la parte baja
+	sbb.w R3, R1		; Restamos la parte parte alta de cada numero, 
+						; incluyendo el acarreo de la primera resta.
+	; COMPARACION
+	cmp.w #0, R0		; Comparo si la resta del resultado(parte baja) de la suma con
+						; la resta de su resultado es 0 para saber si es correcta
+	jnz main			; En el caso de no ser cero saltar al main
+	cmp.w #0, R1		; Comparo la parte alta del resultado con 0
+	jnz 	main		; En el caso de no ser cero salto al main
+	
+	bnot P2_0			; Enciento el led 0 de la placa para mostrar que es correcto.
+	jsr temporizador	; Salto al temporizador para mantener el led encendido 1 segundo
+	bnot P2_0			; Apago el led
+
+	rts					; Retorno a la posicion de puntero de la llamada a esta funcion
+
+; SUMA RESTA Y COMPARACION != 0, NO ENCIENDE LEDS
+; Numero 1: 8888 8888
+; Numero 2: 8888 2222
+; Result E: C081 8888  
+sumne:
+	; CARGAMOS VALORES A SUMAR
+	mov.w #8888h, R0	; Cargamos la parte baja del numero 1
+	mov.w #8888h, R2	; ============IGUAL================ 2
+	add.w R0, R2		; Sumamos la parte baja de cada numero (suma maxima 16 bits)
+	mov.w #8888h, R1	; Cargamos la parte alta del numero 1
+	mov.w #2222h, R3	; ============IGUAL================ 2
+	adc.w R1, R3		; Sumamos la parte alta de cada numero, 
+						; incluyendo el acarreo de la suma parte baja
+	;RESTAMOS EL RESULTADO ERRONEO
+	mov.w #8888h, R0	; Cargamos la parte baja del resultado
+	mov.w #0C081h, R1 	; Cargamos la parte alta del resultado
+	sub.w R2, R0		; Restamos la parte baja del resultado y la suma
+	sbb.w R3, R1		; Restamos la parte alta del resultado y la suma con acarreo
+	; COMPARAMOS LOS VALORES
+	cmp.w #0, R0		; Comparamos parte baja del resultado de la resta con 0
+	jnz 	fin			; Si no es cero salta a fin
+	cmp.w #0, R1		; Comparamos parte alta del resultado de la resta con 0 
+	jnz 	fin			; Si no es cero salta a fin
+	
+	;-ESTO NO SE EJECUTA PORQUE EL RESULTADO NO ES CORRECTO-
+	bnot P2_0
+	jsr temporizador
+	bnot P2_0
+	;-------------------------------------------------------
+fin:
+	rts					; Retorno a la posicion de puntero de la llamada a esta funcion
+
+;CARGAR VALORES DE MEMORIA
+cargar_numero:
+	mov.w #0, A1			; Pongo a 0 la direccion de memoria
+	mov.w a1, A0			; Cargo el valor del numero en a0
+	mov.w #0, R2			; Contador valores a cargar
+	mov.w #0, R3			; Contador de numero de unos
+cargar:
+	cmp.w #4, R2			; Comparo si ya he leido todos los valores
+	jeq fin_cargar			; Si cargue todos los valores salto a fin_cargar
+	lde.w input_data[a0],R1 ; Cargo la palabra de memoria a R1
+	jsr contar_unos			; Salto a contar unos para ver la cantidad de 1 en la palabra
+	add.w #2, A0			; Sumo 2 al contador de memoria ( 2 Bytes =  WORD = 16 bits)
+	add.w #1, R2			; Sumo 1 al contador de valores a cargar
+	jmp cargar				; salto a cargar 
+fin_cargar:
+	bnot P2_1				; Enciendo el led 1
+	bnot P2_5				; Enciendo el led 5
+							; 100010 = 34 cantidad de unos en las palabras
+	jsr temporizador		; salto a temporizador para dejarlos encendidos 1 segundo
+	bnot P2_5				; Apago el led 1
+	bnot P2_1				; Apago el led 5
+
+	rts						; Retorno a la posicion de puntero de la llamada a esta funcion 
+
+;CONTAR NUMERO DE 1 EN PALABRA	
+contar_unos:
+	push.w	R2				; Salvo R2 
+	mov.w #0, R0			; Pongo a 0 el contador de desplazamientos
+continua:
+	mov.w R1, R2			; Guardo en R2 el valor de R1 = valor de memoria cargado para 
+							; no perder el valor cargado en R1 al aplicar AND
+	and.w #0001h, r2		; Aplico AND con la mascara 0000 0000 0000 0001
+	cmp.w #0001h, r2		; Comparo el resultado con 0000 0000 0000 0001 para ver si 
+							; es un 1 el bit menos representativo
+	jnz siguiente			; Si no es cero la comparacion salto a siguiente
+	add.w #1, R3			; Sumo 1 a R3 = contador de 1
+siguiente:
+	shl.w #-1, R1			; Aplico un desplazamiento a la derecha de R1
+	add.w #1, R0			; Sumo 1 al contador de desplazamientos
+	cmp.w #16, R0			; Comparo con 16 el contador de desplazamientos 
+							; (16 desplazamientos => 16 bits palabra)
+	jnz continua			; Si no es cero salto a continua para seguir comprobando
+	pop.w R2				; Recupero el valor de R2
+
+	rts						; Retorno a la posicion de puntero de la llamada a esta funcion 
+	
+		
+temporizador:
+	mov.w	#0,r0		; r0 cuenta de periodos de 2 ms.
+retraso:
+	btstc	3,TA0IC	; Desbordamiento del TA0 (2msec)?
+	jnc	retraso
+	add.w	#1,r0		; r0 = r0+1
+	cmp.w	#500,r0	; r0=500?  (500*2ms=1s)
+	jnz     retraso
+	rts
+;
+;DATOS DE ENTRADA EN MEMORIA  = 34 UNOS
+input_data:
+	.word 539Ah, 12C4h, 0239h, 0FFFFh
+	; 1 numero : 0101 0011 1001 1010
+	; 2 numero : 0001 0010 1100 0100
+	; 3 numero : 0000 0010 0011 1001
+	; 4 numero : 1111 1111 1111 1111
+
+;----- INTERRUPCI�N DE RESET (INICIALIZA PC a VprogTOP) -----------------------------------
+;
+	.section	int_reset,romdata
+	.org		Vvector+(8*4)
+	.lword		reset
+;
+;----- program end -------------------------------------------------------------------------
+;
+	.end
+;
